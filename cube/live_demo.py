@@ -41,8 +41,10 @@ def build_estimator(mesh_file, debug=0, debug_dir="/tmp/fp_live"):
     return est, mesh, to_origin, bbox, mt
 
 
-def render_corner(pose, mt, size=190, dist=0.22, fx=620.0):
-    """Render the mesh at the estimated ORIENTATION (fixed framing) -> RGB panel."""
+def render_corner(pose, mt, obj_diam, size=190, fx=620.0, fit_frac=0.7):
+    """Render the mesh at the estimated ORIENTATION -> RGB panel.
+    Camera distance auto-fits so the object spans ~fit_frac of the panel (works for any object size)."""
+    dist = max(0.15, fx * obj_diam / (fit_frac * size))
     R = pose[:3, :3]
     T = np.eye(4); T[:3, :3] = R; T[:3, 3] = [0, 0, dist]
     K = np.array([[fx, 0, size / 2], [0, fx, size / 2], [0, 0, 1]], float)
@@ -64,7 +66,8 @@ def annotate(color_rgb, pose, K, to_origin, bbox, mt, fps=None):
     vis = draw_xyz_axis(vis, ob_in_cam=center_pose, scale=0.05, K=K, thickness=2,
                         transparency=0, is_input_rgb=True)
     H, W = vis.shape[:2]
-    panel = render_corner(pose, mt)
+    obj_diam = float(np.linalg.norm(bbox[1] - bbox[0]))   # object diagonal, for auto-fit framing
+    panel = render_corner(pose, mt, obj_diam)
     s, mgn = panel.shape[0], 10
     y0, x0 = mgn, W - mgn - s
     vis[y0:y0 + s, x0:x0 + s] = panel
@@ -91,6 +94,7 @@ def select_mask(color_rgb):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mesh_file", default=os.path.join(CODE_DIR, "mesh", "textured.obj"))
+    ap.add_argument("--serial", default=None, help="指定相机序列号 (D435=938422071322)；不传则用第一台")
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--fps", type=int, default=30)
@@ -103,6 +107,8 @@ def main():
     est, mesh, to_origin, bbox, mt = build_estimator(args.mesh_file)
 
     pipeline = rs.pipeline(); config = rs.config()
+    if args.serial:
+        config.enable_device(args.serial)
     config.enable_stream(rs.stream.color, args.width, args.height, rs.format.rgb8, args.fps)
     config.enable_stream(rs.stream.depth, args.width, args.height, rs.format.z16, args.fps)
     profile = pipeline.start(config)
